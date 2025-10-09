@@ -9,10 +9,10 @@ use axum::{
 };
 use reqwest::Client;
 use log::{info, warn, error, debug};
-use silentpayments::Network as SpNetwork;
+use silentpayments::{bitcoin_hashes::{sha256, Hash, HashEngine}, Network as SpNetwork, SilentPaymentAddress};
 use std::sync::Arc;
 use bitcoin_payment_instructions::{amount::Amount, dns_resolver::DNSHrnResolver, PaymentInstructions, PaymentMethod, Network};
-use rand::Rng;
+use rand::{Rng, SeedableRng};
 use faker_rand::en_us::{company::Slogan, names::LastName};
 
 #[derive(Deserialize, Serialize)]
@@ -144,8 +144,19 @@ struct AppState {
     domain: String,
 }
 
-fn generate_random_username() -> String {
-    let mut rng = rand::thread_rng();
+// Generate a random username deterministically on the SP address
+fn generate_random_username(sp_address: &SilentPaymentAddress) -> String {
+    let network_str = match sp_address.get_network() {
+        SpNetwork::Mainnet => "mainnet",
+        SpNetwork::Testnet => "testnet",
+        _ => unreachable!()
+    };
+    let mut engine = sha256::Hash::engine();
+    engine.input(sp_address.get_scan_key().serialize().as_slice());
+    engine.input(sp_address.get_spend_key().serialize().as_slice());
+    engine.input(network_str.as_bytes());
+    let seed = sha256::Hash::from_engine(engine);
+    let mut rng = rand::rngs::StdRng::from_seed(*seed.as_byte_array());
     let adjective;
     loop {
         let slogan = rng.r#gen::<Slogan>().to_string();
@@ -182,16 +193,6 @@ async fn handle_register(
         );
     }
 
-    // if user_name is empty, we generate a random one
-    let user_name = if request.user_name.is_empty() {
-        let random_user_name = generate_random_username();
-        info!("Generated random user name: {}", random_user_name);
-        random_user_name
-    } else {
-        info!("User {} provided user name", request.user_name);
-        request.user_name.clone()
-    };
-
     // Validate SP address
     let sp_address = match silentpayments::SilentPaymentAddress::try_from(request.sp_address.clone()) {
         Ok(sp_address) => {
@@ -216,11 +217,37 @@ async fn handle_register(
     let network_key = match sp_address.get_network() {
         SpNetwork::Mainnet => "sp",
         SpNetwork::Testnet => "tsp",
-        SpNetwork::Regtest => "sprt"
+        SpNetwork::Regtest => {
+            return (
+                StatusCode::BAD_REQUEST,
+                AxumJson(ResponseBody {
+                    message: format!("Can't register regtest addresses"),
+                    received: request,
+                    dns_record_id: None,
+                    record_name: None,
+                })
+            );
+        }
     };
 
+    // TODO verify a signature over some message that user must provides with the request
+    // This is mitigated by the deterministic nature of the username generation, meaning that an impersonator will simply generate an address for someone else without being able to do anything with it
+
+    // if user_name is empty, we generate a random one
+    let user_name = if request.user_name.is_empty() {
+        let random_user_name = generate_random_username(&sp_address);
+        info!("Generated random user name: {}", random_user_name);
+        random_user_name
+    } else {
+        // this won't happen now but we can always support it in the future
+        info!("User {} provided user name", request.user_name);
+        request.user_name.clone()
+    };
+
+    let txt_name = format!("{}.user._bitcoin-payment.{}", user_name, state.domain);
+    let txt_content = format!("bitcoin:?{}={}", network_key, sp_address.to_string());
+
     // First check if the record already exists using DNS-over-HTTPS
-    // It's very unlikely but let's be safe
     match check_txt_record_exists(&user_name, &state.domain, sp_address.get_network()).await {
         Ok(true) => {
             error!("TXT record already exists for user name: {}", user_name);
@@ -230,7 +257,7 @@ async fn handle_register(
                     message: "TXT record already exists".to_string(),
                     received: request,
                     dns_record_id: None, // We don't have the Cloudflare record ID from DNS check
-                    record_name: None,
+                    record_name: Some(txt_name), // This can be useful if user is restoring an existing wallet, he will get is dana address back this way
                 })
             );
         }
@@ -249,9 +276,6 @@ async fn handle_register(
         }
     };
     
-    let txt_name = format!("{}.user._bitcoin-payment.{}", user_name, state.domain);
-    let txt_content = format!("bitcoin:?{}={}", network_key, sp_address.to_string());
-
     info!("Attempting to create TXT record: {}", txt_name);
     let client = Client::new();
     
@@ -356,7 +380,8 @@ mod tests {
 
     #[test]
     fn test_generate_random_username() {
-        let username = generate_random_username();
+        let address_to_register = SilentPaymentAddress::try_from("sp1qq0cygnetgn3rz2kla5cp05nj5uetlsrzez0l4p8g7wehf7ldr93lcqadw65upymwzvp5ed38l8ur2rznd6934xh95msevwrdwtrpk372hyz4vr6g").unwrap();
+        let username = generate_random_username(&address_to_register);
         println!("Generated username: {}", username);
         assert!(!username.is_empty());
     }
