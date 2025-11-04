@@ -358,7 +358,7 @@ async fn main() {
     });
 
     let app = Router::new()
-        .route("/api/register", post(handle_register))
+        .route("/register", post(handle_register))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
@@ -366,7 +366,7 @@ async fn main() {
         .expect("Failed to bind to port 8080");
     
     info!("Server starting on http://127.0.0.1:8080");
-    info!("API endpoint available at: http://127.0.0.1:8080/api/register");
+    info!("API endpoint available at: http://127.0.0.1:8080/register");
     
     axum::serve(listener, app)
         .await

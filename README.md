@@ -17,7 +17,7 @@ Dana Name Server provides a REST API that allows users to register Bitcoin Silen
 
 ## API Endpoints
 
-### POST `/api/register`
+### POST `/register`
 
 Registers a new Bitcoin payment address by creating a DNS TXT record.
 
@@ -91,7 +91,7 @@ The server will start on `http://127.0.0.1:8080`.
 ### Register a Payment Address
 
 ```bash
-curl -X POST http://127.0.0.1:8080/api/register \
+curl -X POST http://127.0.0.1:8080/register \
   -H "Content-Type: application/json" \
   -d '{
     "user_name": "alice",
