@@ -3,17 +3,23 @@ name = "dana_nameserver"
 version = "0.1.0"
 edition = "2024"
 
+[profile.release]
+# Optimize for size
+opt-level = "z"      # Optimize for size instead of speed
+lto = "fat"          # Full Link Time Optimization
+codegen-units = 1    # Better optimization, slightly slower compile
+panic = "abort"      # Smaller binary (no unwinding code)
+strip = true         # Strip symbols from binary
+
 [dependencies]
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
 axum = { version = "0.8.5", default-features = false, features = ["http1", "json", "tokio"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-reqwest = { version = "0.11", features = ["json", "native-tls-vendored"] }
+reqwest = { version = "0.11", default-features = false, features = ["json", "native-tls-vendored"] }
 dotenv = "0.15"
 log = "0.4"
 env_logger = "0.10"
 silentpayments = "0.4.1"
-faker_rand = "0.1.1"
-rand = "0.8.5"
 bip353-rs = { git="https://github.com/Sosthene00/bip353-rs.git", branch="silentpayments" }
 bitcoin-payment-instructions = { git="https://github.com/Sosthene00/bitcoin-payment-instructions.git", branch="add_silent_payments" }

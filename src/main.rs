@@ -9,11 +9,9 @@ use axum::{
 };
 use reqwest::Client;
 use log::{info, warn, error, debug};
-use silentpayments::{bitcoin_hashes::{sha256, Hash, HashEngine}, Network as SpNetwork, SilentPaymentAddress};
+use silentpayments::{Network as SpNetwork, SilentPaymentAddress};
 use std::sync::Arc;
 use bitcoin_payment_instructions::{amount::Amount, dns_resolver::DNSHrnResolver, PaymentInstructions, PaymentMethod, Network};
-use rand::{Rng, SeedableRng};
-use faker_rand::en_us::{company::Slogan, names::LastName};
 
 #[derive(Deserialize, Serialize)]
 struct Request {
