@@ -39,12 +39,12 @@ struct CloudflareRequest {
     ttl: u32,
 }
 
-async fn check_txt_record_exists(
+async fn fetch_sp_address_from_txt_record(
     user_name: &str,
     domain: &str,
     network: SpNetwork
-) -> Result<bool, Bip353Error> {
-    debug!("Checking if TXT record exists for user {} on network {:?}", user_name, network);
+) -> Result<Option<SilentPaymentAddress>, Bip353Error> {
+    debug!("Checking if TXT record exists for user {} on domain {} and network {:?}", user_name, domain, network);
     // Let's not allow regtest address is doesn't make much sense anyway
     let core_network = match network {
         SpNetwork::Mainnet => Network::Bitcoin,
@@ -64,35 +64,39 @@ async fn check_txt_record_exists(
         Ok(instructions) => instructions,
         Err(e) => {
             match e {
-                Bip353Error::WrongNetwork(_) => return Ok(false), // We have a sp address but for the wrong network
-                Bip353Error::DnsError(_) => return Ok(false), // We can't find a record for this user name
+                Bip353Error::DnsError(_) => return Ok(None), // We can't find a record for this user name
                 _ => return Err(e)
             }
         }
     };
-    let sp_record_exists = match payment_instructions {
+    match payment_instructions {
         PaymentInstructions::ConfigurableAmount(instructions) => {
             // The resolver is pretty much useless here since we're only interested in silent payment
             let hrn_resolver = DNSHrnResolver(socket_addr); 
             let dummy_amount = Amount::from_sats(10_000).unwrap(); // Just defining something unlikely to fail in case there's a lnurl in the same entry
             let fixed_amt_instructions = instructions.set_amount(dummy_amount, &hrn_resolver).await?;
-            fixed_amt_instructions.methods().iter().any(|method| {
+            for method in fixed_amt_instructions.methods().iter() {
                 match method {
-                    PaymentMethod::SilentPayment(_) => true,
-                    _ => false
+                    PaymentMethod::SilentPayment(sp_address) => {
+                        return Ok(Some(sp_address.clone()));
+                    },
+                    _ => continue
                 }
-            })
+            }
         }
         PaymentInstructions::FixedAmount(instructions) => {
-            instructions.methods().iter().any(|method| {
+            for method in instructions.methods().iter() {
                 match method {
-                    PaymentMethod::SilentPayment(_) => true,
-                    _ => false
+                    PaymentMethod::SilentPayment(sp_address) => {
+                        return Ok(Some(sp_address.clone()));
+                    },
+                    _ => continue
                 }
-            })
+            }
         }
     };
-    Ok(sp_record_exists)
+
+    Ok(None)
 }
 
 async fn create_txt_record(
