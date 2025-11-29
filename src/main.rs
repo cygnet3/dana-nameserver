@@ -50,6 +50,22 @@ struct LookupResponse {
     sp_address: Option<String>,
 }
 
+// Prefix search endpoint types
+#[derive(Deserialize)]
+struct PrefixSearchRequest {
+    prefix: String,
+    id: String,
+}
+
+#[derive(Serialize)]
+struct PrefixSearchResponse {
+    id: String,
+    message: String,
+    dana_address: Vec<String>,
+    count: usize,
+    total_count: usize,
+}
+
 #[derive(Serialize)]
 struct CloudflareRequest {
     #[serde(rename = "type")]
@@ -214,6 +230,7 @@ struct AppState {
     api_token: String,
     domain: String,
     sp_to_dana: Arc<RwLock<HashMap<SilentPaymentAddress, Vec<String>>>>,
+    dana_to_sp: Arc<RwLock<HashMap<String, SilentPaymentAddress>>>,
 }
 
 async fn handle_register(
@@ -472,6 +489,83 @@ async fn handle_lookup_sp_address(
     }
 }
 
+/// Search for Dana addresses by prefix (minimum 3 characters)
+async fn handle_prefix_search(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<PrefixSearchRequest>,
+) -> (StatusCode, AxumJson<PrefixSearchResponse>) {
+    debug!("Prefix search request received for prefix: {}", query.prefix);
+    
+    // Validate prefix length (minimum 3 characters)
+    if query.prefix.len() < 3 {
+        error!("Prefix too short: '{}' (minimum 3 characters required)", query.prefix);
+        return (
+            StatusCode::BAD_REQUEST,
+            AxumJson(PrefixSearchResponse {
+                id: query.id,
+                message: "Prefix must be at least 3 characters long".to_string(),
+                dana_address: Vec::new(),
+                count: 0,
+                total_count: 0,
+            })
+        );
+    }
+
+    // Convert prefix to lowercase for case-insensitive search
+    let prefix_lower = query.prefix.to_lowercase();
+    
+    // Search through all dana addresses using the reverse map
+    debug!("Searching for dana addresses with prefix: {}", prefix_lower);
+    let map = state.dana_to_sp.read().await;
+    debug!("Cache map contains {} Dana address entries", map.len());
+    
+    const MAX_RESULTS: usize = 25;
+    
+    // Collect all matching addresses first
+    let mut matching_addresses: Vec<String> = Vec::new();
+    
+    // Iterate through all dana addresses (keys of the map)
+    for dana_address in map.keys() {
+        // Case-insensitive prefix match
+        if dana_address.to_lowercase().starts_with(&prefix_lower) {
+            matching_addresses.push(dana_address.clone());
+        }
+    }
+    
+    // Sort for consistent results (no need to dedup since keys are unique)
+    matching_addresses.sort();
+    
+    // Get total count before limiting
+    let total_count = matching_addresses.len();
+    
+    // Limit to MAX_RESULTS
+    let limited_addresses: Vec<String> = matching_addresses.into_iter().take(MAX_RESULTS).collect();
+    let result_count = limited_addresses.len();
+    
+    let message = if total_count > MAX_RESULTS {
+        format!("Found {} matching Dana address(es) (showing first {})", total_count, MAX_RESULTS)
+    } else {
+        format!("Found {} matching Dana address(es)", total_count)
+    };
+    
+    info!("Found {} Dana address(es) matching prefix '{}' (returning {})", 
+        total_count, 
+        query.prefix,
+        result_count
+    );
+    
+    (
+        StatusCode::OK,
+        AxumJson(PrefixSearchResponse {
+            id: query.id,
+            message,
+            dana_address: limited_addresses,
+            count: result_count,
+            total_count,
+        })
+    )
+}
+
 #[tokio::main]
 async fn main() {
     // Initialize logging with default level of 'info' if RUST_LOG is not set
@@ -502,13 +596,15 @@ async fn main() {
     }
 
     let sp_to_dana: Arc<RwLock<HashMap<SilentPaymentAddress, Vec<String>>>> = Arc::new(RwLock::new(HashMap::new()));
+    let dana_to_sp: Arc<RwLock<HashMap<String, SilentPaymentAddress>>> = Arc::new(RwLock::new(HashMap::new()));
     
-    // Populate the map of sp addresses to dana addresses on startup
-    info!("Populating SP address to Dana address map from Cloudflare records...");
+    // Populate the maps of sp addresses to dana addresses and vice versa on startup
+    info!("Populating SP address to Dana address maps from Cloudflare records...");
     match list_bitcoin_records(&zone_id, &api_token).await {
         Ok(records) => {
             info!("Fetched {} Bitcoin TXT records from Cloudflare", records.len());
             let mut map = sp_to_dana.write().await;
+            let mut reverse_map = dana_to_sp.write().await;
             let mut processed_count = 0;
             let mut skipped_count = 0;
             let mut error_count = 0;
@@ -539,6 +635,7 @@ async fn main() {
                                         let dana_addr = dana_address.clone();
                                         let existing = map.entry(sp_address.clone()).or_insert_with(Vec::new);
                                         existing.push(dana_addr.clone());
+                                        reverse_map.insert(dana_addr.clone(), sp_address.clone());
                                         info!("Mapped SP address {} to Dana address {} (total mappings for this SP: {})", 
                                             sp_addr_str, 
                                             &dana_address,
@@ -564,6 +661,7 @@ async fn main() {
                                         let dana_addr = dana_address.clone();
                                         let existing = map.entry(sp_address.clone()).or_insert_with(Vec::new);
                                         existing.push(dana_addr.clone());
+                                        reverse_map.insert(dana_addr.clone(), sp_address.clone());
                                         info!("Mapped SP address {} to Dana address {} (total mappings for this SP: {})", 
                                             sp_addr_str, 
                                             &dana_address,
@@ -599,8 +697,9 @@ async fn main() {
                 }
             }
             
-            info!("Map population complete: {} entries created, {} records processed, {} skipped, {} errors", 
-                map.len(), 
+            info!("Map population complete: {} SP->Dana entries, {} Dana->SP entries, {} records processed, {} skipped, {} errors", 
+                map.len(),
+                reverse_map.len(),
                 processed_count, 
                 skipped_count, 
                 error_count
@@ -616,11 +715,13 @@ async fn main() {
         api_token,
         domain,
         sp_to_dana,
+        dana_to_sp,
     });
 
     let v1_router = Router::new()
         .route("/register", post(handle_register))
-        .route("/lookup", get(handle_lookup_sp_address));
+        .route("/lookup", get(handle_lookup_sp_address))
+        .route("/search", get(handle_prefix_search));
 
     let app = Router::new()
         .nest("/v1", v1_router)
@@ -633,6 +734,7 @@ async fn main() {
     info!("Server starting on http://127.0.0.1:8080");
     info!("API endpoint available at: http://127.0.0.1:8080/v1/register");
     info!("API endpoint available at: http://127.0.0.1:8080/v1/lookup");
+    info!("API endpoint available at: http://127.0.0.1:8080/v1/search");
     
     axum::serve(listener, app)
         .await
