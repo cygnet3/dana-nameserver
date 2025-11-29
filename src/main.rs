@@ -335,6 +335,17 @@ async fn handle_register(
         Ok(Some(registered_sp_address)) => {
             if registered_sp_address == sp_address {
                 // The record already exists and the SP address is the same, we can return the existing record
+                // Update maps to ensure they're in sync
+                let mut sp_map = state.sp_to_dana.write().await;
+                let mut dana_map = state.dana_to_sp.write().await;
+                let existing = sp_map.entry(sp_address.clone()).or_insert_with(Vec::new);
+                if !existing.contains(&dana_address) {
+                    existing.push(dana_address.clone());
+                }
+                dana_map.insert(dana_address.clone(), sp_address.clone());
+                drop(sp_map);
+                drop(dana_map);
+                debug!("Updated maps for existing record: {} -> {}", dana_address, sp_address);
                 return (
                     StatusCode::OK,
                     AxumJson(RegisterResponse {
@@ -380,6 +391,18 @@ async fn handle_register(
     dns_record_id = match create_txt_record(&client, &state.zone_id, &state.api_token, &txt_name, &txt_content).await {
         Ok(Some(id)) => {
             info!("Successfully created TXT record: {} -> {}", txt_name, txt_content);
+            // Update both maps with the new registration
+            let mut sp_map = state.sp_to_dana.write().await;
+            let mut dana_map = state.dana_to_sp.write().await;
+            let existing = sp_map.entry(sp_address.clone()).or_insert_with(Vec::new);
+            if !existing.contains(&dana_address) {
+                existing.push(dana_address.clone());
+                info!("Added Dana address {} to SP address {} mapping", dana_address, sp_address);
+            }
+            dana_map.insert(dana_address.clone(), sp_address.clone());
+            drop(sp_map);
+            drop(dana_map);
+            debug!("Updated maps for new registration: {} -> {}", dana_address, sp_address);
             Some(id)
         }
         Ok(None) => {
