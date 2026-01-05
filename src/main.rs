@@ -1,3 +1,5 @@
+mod api_structs;
+
 use anyhow::Result;
 use axum::{
     Json, Router,
@@ -11,71 +13,26 @@ use bitcoin_payment_instructions::{
 };
 use log::{debug, error, info, warn};
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
 use silentpayments::{Network as SpNetwork, SilentPaymentAddress};
 use std::collections::HashMap;
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
 use tokio::sync::RwLock;
 
+use crate::api_structs::{
+    ApiResponse, CloudflareRequest, LookupRequest, LookupResponse, PrefixSearchRequest,
+    PrefixSearchResponse, Record, RegisterRequest, RegisterResponse,
+};
+
 const CLOUDFLARE_API_BASE_URL: &str = "https://api.cloudflare.com/client/v4";
 const GOOGLE_DNS_RESOLVER_IP: &str = "8.8.8.8:53";
 
-// Register endpoint types
-#[derive(Deserialize, Serialize)]
-struct RegisterRequest {
-    id: String,
+#[derive(Clone)]
+struct AppState {
+    zone_id: String,
+    api_token: String,
     domain: String,
-    user_name: Option<String>,
-    sp_address: String,
-}
-
-#[derive(Serialize)]
-struct RegisterResponse {
-    id: String,
-    message: String,
-    dana_address: Option<String>,
-    sp_address: Option<String>,
-    dns_record_id: Option<String>,
-}
-
-// Lookup endpoint types
-#[derive(Deserialize)]
-struct LookupRequest {
-    sp_address: String,
-    id: String,
-}
-
-#[derive(Serialize)]
-struct LookupResponse {
-    id: String,
-    message: String,
-    dana_address: Vec<String>,
-    sp_address: Option<String>,
-}
-
-// Prefix search endpoint types
-#[derive(Deserialize)]
-struct PrefixSearchRequest {
-    prefix: String,
-    id: String,
-}
-
-#[derive(Serialize)]
-struct PrefixSearchResponse {
-    id: String,
-    message: String,
-    dana_address: Vec<String>,
-    count: usize,
-    total_count: usize,
-}
-
-#[derive(Serialize)]
-struct CloudflareRequest {
-    #[serde(rename = "type")]
-    record_type: String,
-    name: String,
-    content: String,
-    ttl: u32,
+    sp_to_dana: Arc<RwLock<HashMap<SilentPaymentAddress, Vec<String>>>>,
+    dana_to_sp: Arc<RwLock<HashMap<String, SilentPaymentAddress>>>,
 }
 
 async fn fetch_sp_address_from_txt_record(
@@ -196,25 +153,6 @@ async fn create_txt_record(
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct Record {
-    #[allow(unused)]
-    id: String,
-    name: String,
-    #[serde(rename = "type")]
-    record_type: String,
-    content: String,
-    // skip other fields
-}
-
-#[derive(Debug, Deserialize)]
-struct ApiResponse {
-    #[allow(unused)]
-    success: bool,
-    result: Vec<Record>,
-    // skip result_info, errors, messages, ...
-}
-
 async fn list_bitcoin_records(
     zone_id: &str,
     api_token: &str,
@@ -249,21 +187,10 @@ async fn list_bitcoin_records(
     Ok(bitcoin_txts)
 }
 
-#[derive(Clone)]
-struct AppState {
-    zone_id: String,
-    api_token: String,
-    domain: String,
-    sp_to_dana: Arc<RwLock<HashMap<SilentPaymentAddress, Vec<String>>>>,
-    dana_to_sp: Arc<RwLock<HashMap<String, SilentPaymentAddress>>>,
-}
-
 async fn handle_register(
     State(state): State<Arc<AppState>>,
     Json(request): Json<RegisterRequest>,
 ) -> (StatusCode, AxumJson<RegisterResponse>) {
-    
-
     // Just in case
     if state.zone_id.is_empty() || state.api_token.is_empty() {
         error!("Cloudflare credentials missing, DNS record creation failed");
