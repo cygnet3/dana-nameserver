@@ -31,6 +31,7 @@ struct AppState {
     zone_id: String,
     api_token: String,
     domain: String,
+    mainnet_only: bool,
     sp_to_dana: Arc<RwLock<HashMap<SilentPaymentAddress, Vec<String>>>>,
     dana_to_sp: Arc<RwLock<HashMap<String, SilentPaymentAddress>>>,
 }
@@ -241,6 +242,21 @@ async fn handle_register(
                 );
             }
         };
+
+    if state.mainnet_only {
+        if sp_address.get_network() != SpNetwork::Mainnet {
+            return (
+                StatusCode::BAD_REQUEST,
+                AxumJson(RegisterResponse {
+                    id: request.id,
+                    message: format!("Network not allowed: {:?}", sp_address.get_network(),),
+                    dana_address: None,
+                    sp_address: None,
+                    dns_record_id: None,
+                }),
+            );
+        }
+    }
 
     // We modify the key depending on the network we're on (mainnet vs signet/testnet)
     let network_key = match sp_address.get_network() {
@@ -614,6 +630,18 @@ async fn main() {
         .expect("CLOUDFLARE_API_TOKEN environment variable is required");
     let domain =
         std::env::var("DOMAIN_NAME").expect("DOMAIN_NAME environment variable is required");
+    let mainnet_only: bool = std::env::var("MAINNET_ONLY")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .expect("MAINNET_ONLY environment variable is required");
+
+    // we only have to network types: main and test
+    // we don't allow regtest, since this doesn't make sense for a public server
+    if mainnet_only {
+        info!("Allowing mainnet only");
+    } else {
+        info!("Allowing mainnet and testnet");
+    }
 
     if zone_id.is_empty() || api_token.is_empty() {
         error!("Cloudflare credentials not provided. Can't proceed.");
@@ -772,6 +800,7 @@ async fn main() {
         zone_id,
         api_token,
         domain,
+        mainnet_only,
         sp_to_dana,
         dana_to_sp,
     });
