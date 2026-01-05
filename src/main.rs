@@ -16,7 +16,7 @@ use tokio::sync::RwLock;
 use bitcoin_payment_instructions::{amount::Amount, dns_resolver::DNSHrnResolver, PaymentInstructions, PaymentMethod, Network};
 
 const CLOUDFLARE_API_BASE_URL: &str = "https://api.cloudflare.com/client/v4";
-const GOOGLE_DNS_RESOLVER_IP: &str = "8.8.8.8:53";
+const CLOUDFLARE_DNS_RESOLVER_IP: &str = "1.1.1.1:53";
 
 // Register endpoint types
 #[derive(Deserialize, Serialize)]
@@ -89,7 +89,7 @@ async fn fetch_sp_address_from_txt_record(
         SpNetwork::Regtest => return Err(anyhow::anyhow!("Don't allow for regtest address"))
     };
     // Basically silent payments doesn't make the distinction between different testnet
-    let dns_resolver = DNSHrnResolver(SocketAddr::from_str(GOOGLE_DNS_RESOLVER_IP).unwrap());
+    let dns_resolver = DNSHrnResolver(SocketAddr::from_str(CLOUDFLARE_DNS_RESOLVER_IP).unwrap());
     let payment_instructions = match PaymentInstructions::parse(format!("{}@{}", user_name, domain).as_str(), core_network, &dns_resolver, true).await {
         Ok(instructions) => instructions,
         Err(e) => {
