@@ -123,7 +123,7 @@ async fn create_txt_record(
     let record = CloudflareRequest {
         record_type: "TXT".to_string(),
         name: name.to_string(),
-        content: content.to_string(),
+        content: serde_json::to_string(content)?,
         ttl: 3600, // 1 hour TTL
     };
 
