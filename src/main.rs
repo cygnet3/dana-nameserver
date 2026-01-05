@@ -170,7 +170,6 @@ async fn list_bitcoin_records(
         .bearer_auth(api_token)
         .query(&[
             ("type", "TXT"),
-            ("content.startswith", "bitcoin:"),
             ("name.endswith", &format!("user._bitcoin-payment.{domain}")),
         ])
         .send()
@@ -184,13 +183,7 @@ async fn list_bitcoin_records(
         resp.result.len()
     );
 
-    let bitcoin_txts: Vec<Record> = resp
-        .result
-        .into_iter()
-        .filter(|r| r.record_type == "TXT" && r.content.starts_with("bitcoin:"))
-        .collect();
-
-    Ok(bitcoin_txts)
+    Ok(resp.result)
 }
 
 async fn handle_register(
@@ -680,9 +673,15 @@ async fn main() {
             let mut error_count = 0;
 
             for record in records {
+                // Content may be serialized as a json string. If so, we first deserialize (remove the '"').
+                let content = match serde_json::from_str::<String>(&record.content) {
+                    Ok(content) => content,
+                    Err(_) => record.content,
+                };
+
                 debug!(
                     "Processing record: name='{}', content='{}'",
-                    record.name, record.content
+                    record.name, content
                 );
 
                 // Parse record name: {user_name}.user._bitcoin-payment.{domain}
@@ -698,7 +697,7 @@ async fn main() {
 
                     // Parse record content: bitcoin:?{network_key}={sp_address}
                     // Extract SP address from content
-                    if let Some(sp_part) = record.content.strip_prefix("bitcoin:?") {
+                    if let Some(sp_part) = content.strip_prefix("bitcoin:?") {
                         debug!("Found bitcoin: prefix, parsing parameters: {}", sp_part);
                         let mut found_sp = false;
 
