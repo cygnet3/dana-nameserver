@@ -210,7 +210,7 @@ async fn list_bitcoin_records(
         .bearer_auth(api_token)
         .query(&[
             ("type", "TXT"),
-            ("content.startswith", "bitcoin:"),
+            ("content.startswith", "\"bitcoin:"),
         ])
         .send()
         .await?
@@ -219,9 +219,11 @@ async fn list_bitcoin_records(
 
     info!("Received {} Bitcoin TXT records from Cloudflare", resp.result.len());
 
+    debug!("Received Bitcoin TXT records: {:?}", resp.result);
+
     let bitcoin_txts: Vec<Record> = resp.result
         .into_iter()
-        .filter(|r| r.record_type == "TXT" && r.content.starts_with("bitcoin:"))
+        .filter(|r| r.record_type == "TXT" && r.content.starts_with("\"bitcoin:"))
         .collect();
 
     Ok(bitcoin_txts)
@@ -331,7 +333,7 @@ async fn handle_register(
 
     let dana_address = format!("{}@{}", user_name, state.domain);
     let txt_name = format!("{}.user._bitcoin-payment.{}", user_name, state.domain);
-    let txt_content = format!("bitcoin:?{}={}", network_key, sp_address.to_string());
+    let txt_content = format!("\"bitcoin:?{}={}\"", network_key, sp_address.to_string());
 
     // First check if the record already exists using DNS-over-HTTPS
     match fetch_sp_address_from_txt_record(&user_name, &state.domain, sp_address.get_network()).await {
@@ -441,7 +443,7 @@ async fn handle_register(
         message: "Successfully registered silent payment address".to_string(),
         dana_address: Some(dana_address),
         sp_address: Some(sp_address.to_string()),
-        dns_record_id,
+        dns_record_id: None,
     };
     
     debug!("Sending response for record: {}", response_body.dana_address.as_ref().unwrap_or(&"unknown".to_string()));
@@ -648,7 +650,7 @@ async fn main() {
                     
                     // Parse record content: bitcoin:?{network_key}={sp_address}
                     // Extract SP address from content
-                    if let Some(sp_part) = record.content.strip_prefix("bitcoin:?") {
+                    if let Some(sp_part) = record.content.trim_matches('"').strip_prefix("bitcoin:?") {
                         debug!("Found bitcoin: prefix, parsing parameters: {}", sp_part);
                         let mut found_sp = false;
                         
