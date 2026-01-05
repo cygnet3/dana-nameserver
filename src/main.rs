@@ -157,6 +157,7 @@ async fn create_txt_record(
 async fn list_bitcoin_records(
     zone_id: &str,
     api_token: &str,
+    domain: &str,
 ) -> Result<Vec<Record>, Box<dyn std::error::Error + Send + Sync>> {
     let url = format!("{}/zones/{}/dns_records", CLOUDFLARE_API_BASE_URL, zone_id);
     info!(
@@ -167,7 +168,11 @@ async fn list_bitcoin_records(
     let resp = client
         .get(&url)
         .bearer_auth(api_token)
-        .query(&[("type", "TXT"), ("content.startswith", "bitcoin:")])
+        .query(&[
+            ("type", "TXT"),
+            ("content.startswith", "bitcoin:"),
+            ("name.endswith", &format!("user._bitcoin-payment.{domain}")),
+        ])
         .send()
         .await?
         .error_for_status()?
@@ -662,7 +667,7 @@ async fn main() {
 
     // Populate the maps of sp addresses to dana addresses and vice versa on startup
     info!("Populating SP address to Dana address maps from Cloudflare records...");
-    match list_bitcoin_records(&zone_id, &api_token).await {
+    match list_bitcoin_records(&zone_id, &api_token, &domain).await {
         Ok(records) => {
             info!(
                 "Fetched {} Bitcoin TXT records from Cloudflare",
