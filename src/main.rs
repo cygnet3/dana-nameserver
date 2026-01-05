@@ -198,6 +198,7 @@ async fn create_txt_record(
 
 #[derive(Debug, Deserialize)]
 struct Record {
+    #[allow(unused)]
     id: String,
     name: String,
     #[serde(rename = "type")]
@@ -208,6 +209,7 @@ struct Record {
 
 #[derive(Debug, Deserialize)]
 struct ApiResponse {
+    #[allow(unused)]
     success: bool,
     result: Vec<Record>,
     // skip result_info, errors, messages, ...
