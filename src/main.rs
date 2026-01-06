@@ -443,7 +443,7 @@ async fn handle_register(
         message: "Successfully registered silent payment address".to_string(),
         dana_address: Some(dana_address),
         sp_address: Some(sp_address.to_string()),
-        dns_record_id: None,
+        dns_record_id,
     };
     
     debug!("Sending response for record: {}", response_body.dana_address.as_ref().unwrap_or(&"unknown".to_string()));
