@@ -153,7 +153,7 @@ async fn create_txt_record(
     let record = CloudflareRequest {
         record_type: "TXT".to_string(),
         name: name.to_string(),
-        content: content.to_string(),
+        content: serde_json::to_string(content)?,
         ttl: 3600, // 1 hour TTL
     };
 
@@ -210,7 +210,6 @@ async fn list_bitcoin_records(
         .bearer_auth(api_token)
         .query(&[
             ("type", "TXT"),
-            ("content.startswith", "\"bitcoin:"),
         ])
         .send()
         .await?
@@ -221,12 +220,7 @@ async fn list_bitcoin_records(
 
     debug!("Received Bitcoin TXT records: {:?}", resp.result);
 
-    let bitcoin_txts: Vec<Record> = resp.result
-        .into_iter()
-        .filter(|r| r.record_type == "TXT" && r.content.starts_with("\"bitcoin:"))
-        .collect();
-
-    Ok(bitcoin_txts)
+    Ok(resp.result)
 }
 
 #[derive(Clone)]
@@ -333,7 +327,7 @@ async fn handle_register(
 
     let dana_address = format!("{}@{}", user_name, state.domain);
     let txt_name = format!("{}.user._bitcoin-payment.{}", user_name, state.domain);
-    let txt_content = format!("\"bitcoin:?{}={}\"", network_key, sp_address.to_string());
+    let txt_content = format!("bitcoin:?{}={}", network_key, sp_address.to_string());
 
     // First check if the record already exists using DNS-over-HTTPS
     match fetch_sp_address_from_txt_record(&user_name, &state.domain, sp_address.get_network()).await {
@@ -638,7 +632,15 @@ async fn main() {
             let mut error_count = 0;
             
             for record in records {
-                debug!("Processing record: name='{}', content='{}'", record.name, record.content);
+                // Content may be serialized as a json string. If so, we first deserialize (remove the '"').
+                let content = match serde_json::from_str::<String>(&record.content) {
+                    Ok(content) => content,
+                    // if the string is not using json formatting (wrapped in '"'), we take the raw
+                    // string instead.
+                    Err(_) => record.content,
+                };
+
+                debug!("Processing record: name='{}', content='{}'", record.name, content);
                 
                 // Parse record name: {user_name}.user._bitcoin-payment.{domain}
                 // Extract user_name from the name (user_name can contain dots)
@@ -650,7 +652,7 @@ async fn main() {
                     
                     // Parse record content: bitcoin:?{network_key}={sp_address}
                     // Extract SP address from content
-                    if let Some(sp_part) = record.content.trim_matches('"').strip_prefix("bitcoin:?") {
+                    if let Some(sp_part) = content.strip_prefix("bitcoin:?") {
                         debug!("Found bitcoin: prefix, parsing parameters: {}", sp_part);
                         let mut found_sp = false;
                         
