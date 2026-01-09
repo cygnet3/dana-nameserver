@@ -506,7 +506,7 @@ async fn handle_lookup_sp_address(
                 AxumJson(LookupResponse {
                     id: query.id,
                     message: format!("Invalid SP address: {}", e),
-                    dana_address: Vec::new(),
+                    dana_addresses: Vec::new(),
                     sp_address: None,
                 }),
             );
@@ -531,7 +531,7 @@ async fn handle_lookup_sp_address(
                 AxumJson(LookupResponse {
                     id: query.id,
                     message: "Successfully found Dana address(es)".to_string(),
-                    dana_address: dana_addresses.clone(),
+                    dana_addresses: dana_addresses.clone(),
                     sp_address: Some(sp_address.to_string()),
                 }),
             )
@@ -543,7 +543,7 @@ async fn handle_lookup_sp_address(
                 AxumJson(LookupResponse {
                     id: query.id,
                     message: "SP address not found".to_string(),
-                    dana_address: Vec::new(),
+                    dana_addresses: Vec::new(),
                     sp_address: Some(sp_address.to_string()),
                 }),
             )
@@ -572,7 +572,7 @@ async fn handle_prefix_search(
             AxumJson(PrefixSearchResponse {
                 id: query.id,
                 message: "Prefix must be at least 3 characters long".to_string(),
-                dana_address: Vec::new(),
+                dana_addresses: Vec::new(),
                 count: 0,
                 total_count: 0,
             }),
@@ -629,7 +629,7 @@ async fn handle_prefix_search(
         AxumJson(PrefixSearchResponse {
             id: query.id,
             message,
-            dana_address: limited_addresses,
+            dana_addresses: limited_addresses,
             count: result_count,
             total_count,
         }),
