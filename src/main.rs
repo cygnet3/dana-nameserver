@@ -479,7 +479,7 @@ async fn handle_lookup_sp_address(
                 AxumJson(LookupResponse {
                     id: query.id,
                     message: format!("Invalid SP address: {}", e),
-                    dana_address: Vec::new(),
+                    dana_addresses: Vec::new(),
                     sp_address: None,
                 }),
             );
@@ -504,7 +504,7 @@ async fn handle_lookup_sp_address(
                 AxumJson(LookupResponse {
                     id: query.id,
                     message: "Successfully found Dana address(es)".to_string(),
-                    dana_address: dana_addresses.clone(),
+                    dana_addresses: dana_addresses.clone(),
                     sp_address: Some(sp_address.to_string()),
                 }),
             )
@@ -516,7 +516,7 @@ async fn handle_lookup_sp_address(
                 AxumJson(LookupResponse {
                     id: query.id,
                     message: "SP address not found".to_string(),
-                    dana_address: Vec::new(),
+                    dana_addresses: Vec::new(),
                     sp_address: Some(sp_address.to_string()),
                 }),
             )
@@ -545,7 +545,7 @@ async fn handle_prefix_search(
             AxumJson(PrefixSearchResponse {
                 id: query.id,
                 message: "Prefix must be at least 3 characters long".to_string(),
-                dana_address: Vec::new(),
+                dana_addresses: Vec::new(),
                 count: 0,
                 total_count: 0,
             }),
@@ -602,7 +602,7 @@ async fn handle_prefix_search(
         AxumJson(PrefixSearchResponse {
             id: query.id,
             message,
-            dana_address: limited_addresses,
+            dana_addresses: limited_addresses,
             count: result_count,
             total_count,
         }),
@@ -629,6 +629,12 @@ async fn main() {
         .expect("CLOUDFLARE_API_TOKEN environment variable is required");
     let domain =
         std::env::var("DOMAIN_NAME").expect("DOMAIN_NAME environment variable is required");
+    let server_host =
+        std::env::var("SERVER_HOST").expect("SERVER_HOST environment variable is required");
+    let server_port: u32 = std::env::var("SERVER_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .expect("SERVER_PORT environment variable is required");
 
     if zone_id.is_empty() || api_token.is_empty() {
         error!("Cloudflare credentials not provided. Can't proceed.");
@@ -809,14 +815,16 @@ async fn main() {
 
     let app = Router::new().nest("/v1", v1_router).with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
-        .await
-        .expect("Failed to bind to port 8080");
+    let server_addr = format!("{server_host}:{server_port}");
 
-    info!("Server starting on http://127.0.0.1:8080");
-    info!("API endpoint available at: http://127.0.0.1:8080/v1/register");
-    info!("API endpoint available at: http://127.0.0.1:8080/v1/lookup");
-    info!("API endpoint available at: http://127.0.0.1:8080/v1/search");
+    let listener = tokio::net::TcpListener::bind(&server_addr)
+        .await
+        .expect("Failed to bind to server address");
+
+    info!("Server starting on {server_addr}");
+    info!("API endpoint available at: http://{server_addr}/v1/register");
+    info!("API endpoint available at: http://{server_addr}/v1/lookup");
+    info!("API endpoint available at: http://{server_addr}/v1/search");
 
     axum::serve(listener, app)
         .await
